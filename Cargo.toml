@@ -1,0 +1,19 @@
+[package]
+name = "bark-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tch = "0.12.0"
+
+# log
+log = "0.4.17"
+env_logger = "0.10.0"
+
+anyhow = "1.0.71"
+rust-bert = { git="https://github.com/guillaume-be/rust-bert.git" }
+rust_tokenizers = "8.1.0"
+
+indicatif = "0.17.3"
