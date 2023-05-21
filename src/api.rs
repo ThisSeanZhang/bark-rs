@@ -1,5 +1,5 @@
 use rust_bert::pipelines::masked_language::MaskedLanguageModel;
-use tch::Tensor;
+use tch::{Tensor, Device};
 
 use crate::{bark_gpt::BarkGPT, model::fine::FineGPT, generation::generate_text_semantic};
 
@@ -96,6 +96,7 @@ pub struct BarkModel {
   pub tokenizer: Tokenizer,
   pub coarse: BarkGPT,
   // pub fine: FineGPT
+  pub device: Device,
 }
 
 pub struct Tokenizer {

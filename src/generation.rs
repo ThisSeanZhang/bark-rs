@@ -5,7 +5,7 @@ use rust_bert::{pipelines::{masked_language::{MaskedLanguageModel, MaskedLanguag
 use tch::{Device, Cuda, nn::{Module, VarStore}, Tensor, IndexOp, Kind};
 use indicatif::ProgressBar;
 
-use crate::{bark_gpt::{Config, BarkGPT}, api::{BarkModel, Tokenizer}, model::fine::FineGPT};
+use crate::{bark_gpt::{Config, BarkGPT}, api::{BarkModel, Tokenizer}, model::{fine::FineGPT, self}};
 
 const TEXT_ENCODING_OFFSET: i64 = 10_048;
 const SEMANTIC_PAD_TOKEN: i64 = 10_000;
@@ -94,7 +94,8 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
   let coarse_ckpt_path = _get_ckpt_path(&BarkModelType::Coarse, use_small);
   let fine_ckpt_path = _get_ckpt_path(&BarkModelType::Fine, use_small);
 
-  info!("device: {:?}", Device::cuda_if_available());
+  let device = Device::Cpu;
+  info!("device: {:?}", device);
 
   let text_config  = Config {
     n_layer: 12,
@@ -108,7 +109,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
     n_codes_total: 8,
     n_codes_given: 1,
   };
-  let text_vs = VarStore::new(Device::cuda_if_available());
+  let text_vs = VarStore::new(device);
   let text_path = text_vs.root() / "_orig_mod";
   let text = BarkGPT::new(text_path, text_config);
 
@@ -133,7 +134,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
     n_codes_given: 1,
   };
 
-  let coarse_vs = VarStore::new(Device::cuda_if_available());
+  let coarse_vs = VarStore::new(device);
   let coarse_path = coarse_vs.root() / "_orig_mod";
   let coarse = BarkGPT::new(coarse_path, coarse_config);
 
@@ -162,7 +163,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
 
   // info!("fine config: {fine_config:?}");
 
-  // let fine_vs = VarStore::new(Device::cuda_if_available());
+  // let fine_vs = VarStore::new(device);
   // let fine_path = fine_vs.root() / "_orig_mod";
   // let fine = FineGPT::new(fine_path, fine_config);
 
@@ -183,6 +184,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
     coarse,
     tokenizer,
     // fine,
+    device,
   }
 
 }
@@ -330,9 +332,10 @@ pub fn generate_text_semantic(
   ], -1).unsqueeze(0);
 
   info!("input x shape: {:?}", x.size());
+  let use_device = models.device.clone();
 
   let out = tch::no_grad(move|| -> Tensor {
-    let mut x = x.to(Device::cuda_if_available());
+    let mut x = x.to(use_device);
     // TODO: modify back
     let n_tot_steps = 768;
     let mut kv_cache: Option<Vec<Option<(Tensor, Tensor)>>> = None;
