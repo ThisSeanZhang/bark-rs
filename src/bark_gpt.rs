@@ -373,7 +373,7 @@ impl BarkGPT {
   }
 
   // idx, merge_context=False, past_kv=None, position_ids=None, use_cache=False
-  pub fn forward_t(&self, idx: &Tensor, train: bool, merge_context: bool ,mut past_kv: Option<Vec<Option<(Tensor, Tensor)>>>, use_position_ids: Option<Tensor>, use_cache: bool) -> (Tensor, Option<Vec<Option<(Tensor, Tensor)>>>) {
+  pub fn forward_t(&self, index: u64, idx: &Tensor, train: bool, merge_context: bool ,past_kv: Option<Vec<Option<(Tensor, Tensor)>>>, use_position_ids: Option<Tensor>, use_cache: bool) -> (Tensor, Option<Vec<Option<(Tensor, Tensor)>>>) {
     // info!("input x shape: {:?}", idx.size());
     let device = idx.device();
     // info!("using device is : {:?}", device);
@@ -431,8 +431,16 @@ impl BarkGPT {
       position_ids
     };
     
+    if index == 756 || index == 755 {
+      info!("index is: {index}, t is: {t}");
+      info!("position_ids shape: {:?}", position_ids.data());
+      info!("wpe shape: {:?}", self.wpe.ws.data());
+    }
     
     let pos_emb = self.wpe.forward(&position_ids).to_device(device);
+    if index == 756 || index == 755 {
+      info!("pos_emb shape: {:?}", pos_emb.data());
+    }
     let x = (tok_emb + pos_emb).dropout(self.drop, train);
     
     // info!("before block x shape: {:?}", x.size());

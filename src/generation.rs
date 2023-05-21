@@ -353,7 +353,7 @@ pub fn generate_text_semantic(
       } else {
         x.i(..)
       };
-      let (logits, new_kv_cache) = models.text.forward_t(&input_x , false, true, kv_cache, None, use_kv_caching);
+      let (logits, new_kv_cache) = models.text.forward_t(index,&input_x , false, true, kv_cache, None, use_kv_caching);
       kv_cache = new_kv_cache;
 
       // must be [1, 1, 10048]
