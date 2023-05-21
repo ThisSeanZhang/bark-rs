@@ -94,7 +94,7 @@ fn text_to_semantic(
 pub struct BarkModel {
   pub text: BarkGPT,
   pub tokenizer: Tokenizer,
-  pub coarse: BarkGPT,
+  // pub coarse: BarkGPT,
   // pub fine: FineGPT
   pub device: Device,
 }

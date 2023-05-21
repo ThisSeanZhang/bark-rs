@@ -16,7 +16,7 @@ const SEMANTIC_INFER_TOKEN: i64 = 129_599;
 const SEMANTIC_VOCAB_SIZE: i64 = 10_000;
 
 #[derive(Debug)]
-enum BarkModelType {
+pub enum BarkModelType {
   Text,
   Coarse,
   Fine
@@ -80,7 +80,7 @@ fn grab_best_device(use_gpu: bool) -> Device {
   }
 }
 
-fn _load_model(device: Device, use_small: bool) -> BarkModel {
+pub fn _load_model(device: Device, use_small: bool) -> BarkModel {
   // match model_type {
   //   BarkModelType::Text => todo!(),
   //   BarkModelType::Coarse => todo!(),
@@ -94,7 +94,6 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
   let coarse_ckpt_path = _get_ckpt_path(&BarkModelType::Coarse, use_small);
   let fine_ckpt_path = _get_ckpt_path(&BarkModelType::Fine, use_small);
 
-  let device = Device::Cpu;
   info!("device: {:?}", device);
 
   let text_config  = Config {
@@ -181,7 +180,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
   let tokenizer = load_tokenizer();
   BarkModel{
     text,
-    coarse,
+    // coarse,
     tokenizer,
     // fine,
     device,
@@ -197,10 +196,10 @@ fn _clear_cuda_cache() {
   }
 }
 
-fn load_tokenizer() -> Tokenizer {
+pub fn load_tokenizer() -> Tokenizer {
   let sequence_classification_config = MaskedLanguageConfig::new(
     ModelType::Bert,
-    LocalResource::from(PathBuf::from("C:\\Users\\Sean\\rustbert\\distilbert\\rust_model.ot")),
+    LocalResource::from(get_cache_path().join("rust_model.ot")),
     RemoteResource::from_pretrained(("bert-base-multilingual-cased/config", "https://huggingface.co/bert-base-multilingual-cased/raw/main/config.json")),
     RemoteResource::from_pretrained(("bert-base-multilingual-cased/vocab", "https://huggingface.co/bert-base-multilingual-cased/raw/main/vocab.txt")),
     None,
@@ -215,10 +214,14 @@ fn load_tokenizer() -> Tokenizer {
   }
 }
 
-fn _get_ckpt_path(model_type: &BarkModelType, use_small: bool) -> PathBuf {
+fn get_cache_path() -> PathBuf {
+  env::current_dir().unwrap().clone().join("cache")
+}
+
+pub fn _get_ckpt_path(model_type: &BarkModelType, use_small: bool) -> PathBuf {
   let file_name = ModelConfig::get_config(use_small, model_type).file_name;
   // TODO: Maybe panic
-  let path = env::current_dir().unwrap().clone().join("cache").join(file_name);
+  let path = get_cache_path().join(file_name);
   info!("using file {path:?}");
   if !path.exists() {
     info!("{model_type:?} model not found");
@@ -420,6 +423,8 @@ mod tests {
     use rust_bert::{pipelines::{masked_language::{MaskedLanguageConfig, MaskedLanguageModel}, common::ModelType}, resources::{LocalResource, RemoteResource}};
     use tch::{Tensor, Kind};
 
+    use crate::generation::get_cache_path;
+
   #[test]
   fn test_top_n() {
     let mut logits = Tensor::of_slice(&[3.0, 1.0, 6.0, 4.0, 5.0, 2.0]);
@@ -465,7 +470,7 @@ mod tests {
   fn test_token() {
     let sequence_classification_config = MaskedLanguageConfig::new(
       ModelType::Bert,
-      LocalResource::from(PathBuf::from("C:\\Users\\Sean\\rustbert\\distilbert\\rust_model.ot")),
+      LocalResource::from(get_cache_path().join("rust_model.ot")),
       RemoteResource::from_pretrained(("bert-base-multilingual-cased/config", "https://huggingface.co/bert-base-multilingual-cased/raw/main/config.json")),
       RemoteResource::from_pretrained(("bert-base-multilingual-cased/vocab", "https://huggingface.co/bert-base-multilingual-cased/raw/main/vocab.txt")),
       None,
