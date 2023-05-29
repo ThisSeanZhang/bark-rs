@@ -306,6 +306,7 @@ pub fn generate_text_semantic(
 
   let mut encoded_text = models.tokenizer.tokenize(&text);
 
+  info!("encoded code is: {encoded_text:?}");
   if encoded_text.len() > 256 {
     let p = (encoded_text.len() - 256) as f64 / encoded_text.len() as f64 * 100.0;
     warn!(
@@ -318,7 +319,8 @@ pub fn generate_text_semantic(
   }
 
   let encoded_text = Tensor::of_slice(&encoded_text) + TEXT_ENCODING_OFFSET;
-
+  info!("encoded code after add TEXT_ENCODING_OFFSET: {encoded_text:?}");
+  info!("encoded code after add TEXT_ENCODING_OFFSET: {}", encoded_text.data());
   let semantic_history = if let Some(semantic_history) = semantic_history {
     semantic_history.to_kind(tch::Kind::Int64);
     // lop off if history is too long, pad if needed
@@ -347,6 +349,13 @@ pub fn generate_text_semantic(
     let pb = ProgressBar::new(n_tot_steps);
     for index in 0..n_tot_steps {
       pb.inc(1);
+      match index {
+        753..=756 => {
+          info!("x content: {:?}", x.data());
+          info!("x content: {}", x.data());
+        },
+        _=> ()
+      }
       // info!("index is: {index}");
       let input_x = if kv_cache.is_some() {
         x.i((.., -1))

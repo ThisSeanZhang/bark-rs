@@ -17,7 +17,7 @@ fn main() {
     env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let bark_model = get_model(Device::cuda_if_available(), true);
+    let bark_model = get_model(Device::Cuda(0), true);
     let text = " \
         Hello, my name is Suno. And, uh — and I like pizza. [laughs] \
         But I also have other interests such as playing tic tac toe. \
