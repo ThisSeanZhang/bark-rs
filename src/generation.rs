@@ -16,7 +16,7 @@ const SEMANTIC_INFER_TOKEN: i64 = 129_599;
 const SEMANTIC_VOCAB_SIZE: i64 = 10_000;
 
 #[derive(Debug)]
-enum BarkModelType {
+pub enum BarkModelType {
   Text,
   Coarse,
   Fine
@@ -80,7 +80,7 @@ fn grab_best_device(use_gpu: bool) -> Device {
   }
 }
 
-fn _load_model(device: Device, use_small: bool) -> BarkModel {
+pub fn _load_model(device: Device, use_small: bool) -> BarkModel {
   // match model_type {
   //   BarkModelType::Text => todo!(),
   //   BarkModelType::Coarse => todo!(),
@@ -94,7 +94,6 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
   let coarse_ckpt_path = _get_ckpt_path(&BarkModelType::Coarse, use_small);
   let fine_ckpt_path = _get_ckpt_path(&BarkModelType::Fine, use_small);
 
-  let device = Device::Cpu;
   info!("device: {:?}", device);
 
   let text_config  = Config {
@@ -181,7 +180,7 @@ fn _load_model(device: Device, use_small: bool) -> BarkModel {
   let tokenizer = load_tokenizer();
   BarkModel{
     text,
-    coarse,
+    // coarse,
     tokenizer,
     // fine,
     device,
@@ -197,10 +196,10 @@ fn _clear_cuda_cache() {
   }
 }
 
-fn load_tokenizer() -> Tokenizer {
+pub fn load_tokenizer() -> Tokenizer {
   let sequence_classification_config = MaskedLanguageConfig::new(
     ModelType::Bert,
-    LocalResource::from(PathBuf::from("C:\\Users\\Sean\\rustbert\\distilbert\\rust_model.ot")),
+    LocalResource::from(get_cache_path().join("rust_model.ot")),
     RemoteResource::from_pretrained(("bert-base-multilingual-cased/config", "https://huggingface.co/bert-base-multilingual-cased/raw/main/config.json")),
     RemoteResource::from_pretrained(("bert-base-multilingual-cased/vocab", "https://huggingface.co/bert-base-multilingual-cased/raw/main/vocab.txt")),
     None,
@@ -215,10 +214,14 @@ fn load_tokenizer() -> Tokenizer {
   }
 }
 
-fn _get_ckpt_path(model_type: &BarkModelType, use_small: bool) -> PathBuf {
+fn get_cache_path() -> PathBuf {
+  env::current_dir().unwrap().clone().join("cache")
+}
+
+pub fn _get_ckpt_path(model_type: &BarkModelType, use_small: bool) -> PathBuf {
   let file_name = ModelConfig::get_config(use_small, model_type).file_name;
   // TODO: Maybe panic
-  let path = env::current_dir().unwrap().clone().join("cache").join(file_name);
+  let path = get_cache_path().join(file_name);
   info!("using file {path:?}");
   if !path.exists() {
     info!("{model_type:?} model not found");
@@ -303,6 +306,7 @@ pub fn generate_text_semantic(
 
   let mut encoded_text = models.tokenizer.tokenize(&text);
 
+  info!("encoded code is: {encoded_text:?}");
   if encoded_text.len() > 256 {
     let p = (encoded_text.len() - 256) as f64 / encoded_text.len() as f64 * 100.0;
     warn!(
@@ -315,12 +319,13 @@ pub fn generate_text_semantic(
   }
 
   let encoded_text = Tensor::of_slice(&encoded_text) + TEXT_ENCODING_OFFSET;
-
+  info!("encoded code after add TEXT_ENCODING_OFFSET: {encoded_text:?}");
+  info!("encoded code after add TEXT_ENCODING_OFFSET: {}", encoded_text.data());
   let semantic_history = if let Some(semantic_history) = semantic_history {
-    semantic_history.to_kind(tch::Kind::Int64);
+    let mut semantic_history = semantic_history.to_kind(tch::Kind::Int64);
     // lop off if history is too long, pad if needed
     if semantic_history.size()[0] < 256 {
-      semantic_history.pad(&[256], "constant", Some(SEMANTIC_PAD_TOKEN as f64));
+      semantic_history = semantic_history.pad(&[256], "constant", Some(SEMANTIC_PAD_TOKEN as f64));
     }
     semantic_history
   } else {
@@ -332,25 +337,34 @@ pub fn generate_text_semantic(
   ], -1).unsqueeze(0);
 
   info!("input x shape: {:?}", x.size());
+  info!("input x shape: {}", x.data());
   let use_device = models.device.clone();
 
   let out = tch::no_grad(move|| -> Tensor {
     let mut x = x.to(use_device);
-    // TODO: modify back
+    // TODO: modify back 768
     let n_tot_steps = 768;
+    // let n_tot_steps = 10;
     let mut kv_cache: Option<Vec<Option<(Tensor, Tensor)>>> = None;
 
     
     let pb = ProgressBar::new(n_tot_steps);
     for index in 0..n_tot_steps {
       pb.inc(1);
+      // info!("x content: {:?}", x.data());
+      info!("x content: {}", x.data());
       // info!("index is: {index}");
       let input_x = if kv_cache.is_some() {
-        x.i((.., -1))
+        // x.select(-1, -1).unsqueeze(-1)
+        // let size = x.size();
+        // let length = size.last().unwrap();
+        x.i((.., (-1))).unsqueeze(-1)
       } else {
         x.i(..)
       };
-      let (logits, new_kv_cache) = models.text.forward_t(&input_x , false, true, kv_cache, None, use_kv_caching);
+      info!("kv_cache is exist: {}, input x is: {}", kv_cache.is_some(), input_x);
+      let (logits, new_kv_cache) = models.text.forward_t(index,&input_x , false, true, kv_cache, None, use_kv_caching);
+      // info!("new_kv_cache: {}", new_kv_cache.is_some());
       kv_cache = new_kv_cache;
 
       // must be [1, 1, 10048]
@@ -382,10 +396,12 @@ pub fn generate_text_semantic(
       // }
 
       let props = (relevant_logits / temp).softmax(-1, Kind::Float);
+      // info!("props: {}", props.data());
       // println!("props: {}", props.data());
       let item_next = props.multinomial(1, false);
       // println!("item_next.squeeze(): {}", item_next.squeeze());
-      // println!("item_next.int64_value(&[0]): {}", item_next.int64_value(&[0]));
+      println!("item_next: {}", item_next);
+      // println!("props.double_value(&[-1]): {}", props.i(-1));
       if allow_early_stop 
         && (item_next.int64_value(&[0]) == SEMANTIC_VOCAB_SIZE
             || props.double_value(&[-1]) >= min_eos_p
@@ -419,6 +435,8 @@ mod tests {
 
     use rust_bert::{pipelines::{masked_language::{MaskedLanguageConfig, MaskedLanguageModel}, common::ModelType}, resources::{LocalResource, RemoteResource}};
     use tch::{Tensor, Kind};
+
+    use crate::generation::get_cache_path;
 
   #[test]
   fn test_top_n() {
@@ -465,7 +483,7 @@ mod tests {
   fn test_token() {
     let sequence_classification_config = MaskedLanguageConfig::new(
       ModelType::Bert,
-      LocalResource::from(PathBuf::from("C:\\Users\\Sean\\rustbert\\distilbert\\rust_model.ot")),
+      LocalResource::from(get_cache_path().join("rust_model.ot")),
       RemoteResource::from_pretrained(("bert-base-multilingual-cased/config", "https://huggingface.co/bert-base-multilingual-cased/raw/main/config.json")),
       RemoteResource::from_pretrained(("bert-base-multilingual-cased/vocab", "https://huggingface.co/bert-base-multilingual-cased/raw/main/vocab.txt")),
       None,
