@@ -194,22 +194,33 @@ struct CausalSelfAttention {
     // info!("CausalSelfAttention k shape: {:?}", k.size());
     // info!("CausalSelfAttention q shape: {:?}", q.size());
     // info!("CausalSelfAttention v shape: {:?}", v.size());
+    // let is_causal = past_kv.is_none();
     if let Some((past_key, past_value)) = past_kv.take() {
       k = Tensor::cat(&[past_key, k], -2);
       v = Tensor::cat(&[past_value, v], -2);
     }
-    let mask_init = Tensor::ones(&[sz_t, sz_t], (Kind::Float, xs.device())).tril(0);
-    let mask = mask_init.view([1, 1, sz_t, sz_t]);
+    // let mask_init = Tensor::ones(&[sz_t, sz_t], (Kind::Float, xs.device())).tril(0);
+    // let mask = mask_init.view([1, 1, sz_t, sz_t]);
 
-    let y = tch::Tensor::scaled_dot_product_attention(&q, &k, &v, Some(&mask), self.dropout, past_kv.is_some());
+    let att = q.matmul(&k.transpose(-2, -1)) * (1.0 / f64::sqrt(sizes[3] as f64));
+    let att = att.masked_fill(&&self.mask.i((.., .., ..sz_t, ..sz_t)).eq(0.), std::f64::NEG_INFINITY);
+    let att = att.softmax(-1, Kind::Float).dropout(0.0, train);
+    let y = att.matmul(&v).transpose(1, 2).contiguous().view([sz_b, sz_t, sz_c]);
+    
+    // let mask = if is_causal {
+    //   None
+    // } else {
+    //   Some(&mask)
+    // };
+    // let y = tch::Tensor::scaled_dot_product_attention(&q, &k, &v, mask, self.dropout, is_causal);
     let ys = y.transpose(1, 2).contiguous().view([sz_b, sz_t, sz_c]);
 
     // TODO: reflash cache
     if use_cache {
       past_kv = Some((k, v));
     }
-    
-    (ys.apply(&self.proj).dropout(self.dropout, train), past_kv)
+    let result = self.proj.forward_t(&ys, train).dropout(self.dropout, train);
+    (result, past_kv)
     }
   }
 
@@ -269,10 +280,9 @@ pub struct MLP {
 
 impl ModuleT for MLP {
     fn forward_t(&self, xs: &Tensor, train: bool) -> Tensor {
-      let xs = self.c_fc.forward(&xs);
+      let xs = self.c_fc.forward(&xs).gelu("none");
       let xs = self.c_proj.forward(&xs);
-      let xs = xs.dropout(self.drop, train);
-      xs.gelu("none")
+      xs.dropout(self.drop, train)
     }
 }
 
@@ -377,7 +387,11 @@ impl BarkGPT {
     // info!("input x shape: {:?}", idx.size());
     let device = idx.device();
     // info!("using device is : {:?}", device);
-    let (b,mut t) = idx.size2().unwrap();
+    let size = idx.size();
+    let ( b, mut t) = (size[0], size[1]);
+    info!("size is : {size:?}, t is: {t}");
+    // let (b,mut t, _) = idx.size3().unwrap();
+    // info!("b: {b:}, t: {t:}");
     // info!("input x size2: {b} {t}");
     let tok_emb = if past_kv.is_some() {
       assert!( t == 1);
@@ -406,19 +420,22 @@ impl BarkGPT {
     };
 
     
+    // info!("tok_emb shape: {}", tok_emb);
     // info!("tok_emb shape: {:?}", tok_emb.size());
 
     let (past_length, use_past_kv) = if let Some(past) = past_kv {
-      let past_length = past[0].as_ref().unwrap().0.size3().unwrap().1.clone();
+      let size = past[0].as_ref().unwrap().0.size();
+      let past_length = size[size.len() - 2];
       // [1, 12, 257, 64]
-      // past_length = 12
+      // past_length = 257
+      info!("past_length is: {past_length}");
       (past_length, past) 
     } else {
       let mut reuslt: Vec<Option<(Tensor, Tensor)>> = Vec::with_capacity(self.h.len());
       for i in 0..self.h.len() {
         reuslt.push(None);
       }
-      (self.h.len() as i64, reuslt)
+      (0, reuslt)
     };
 
     let position_ids = if let Some(position_ids) = use_position_ids {
@@ -431,16 +448,25 @@ impl BarkGPT {
       position_ids
     };
     
-    if index == 756 || index == 755 {
-      info!("index is: {index}, t is: {t}");
-      info!("position_ids shape: {:?}", position_ids.data());
-      info!("wpe shape: {:?}", self.wpe.ws.data());
+    match index {
+      0 | 1 | 2 | 753..=756 => {
+        info!("index is: {index}, t is: {t}");
+        info!("position_ids shape: {:?}", position_ids.data());
+        info!("position_ids content: {}", position_ids);
+        info!("position_ids max: {}", position_ids.max());
+        info!("wpe shape: {:?}", self.wpe.ws.data());
+      },
+      _=> ()
     }
     
     let pos_emb = self.wpe.forward(&position_ids).to_device(device);
-    if index == 756 || index == 755 {
-      info!("pos_emb shape: {:?}", pos_emb.data());
+    match index {
+      753..=756 => {
+        info!("pos_emb shape: {:?}", pos_emb.data());
+      },
+      _=> ()
     }
+
     let x = (tok_emb + pos_emb).dropout(self.drop, train);
     
     // info!("before block x shape: {:?}", x.size());
@@ -465,7 +491,12 @@ impl BarkGPT {
     };
     
     let result = self.ln_f.forward_t(&result, train);
-    let result = self.lm_head.forward_t(&result, train);
+    // info!("result: {}", result);
+    let a = result.i((.., -1, ..)).unsqueeze(0);
+    // info!("result.i((.., -1, ..)) data: {}", a);
+    // info!("result.i((.., -1, ..)) shape: {:?}", a.size());
+    // info!("result shape: {:?}", result.select(1, -1));
+    let result = self.lm_head.forward_t(&a, train);
     // info!("result shape: {:?}", result.size());
     (result, cache)
     

@@ -322,10 +322,10 @@ pub fn generate_text_semantic(
   info!("encoded code after add TEXT_ENCODING_OFFSET: {encoded_text:?}");
   info!("encoded code after add TEXT_ENCODING_OFFSET: {}", encoded_text.data());
   let semantic_history = if let Some(semantic_history) = semantic_history {
-    semantic_history.to_kind(tch::Kind::Int64);
+    let mut semantic_history = semantic_history.to_kind(tch::Kind::Int64);
     // lop off if history is too long, pad if needed
     if semantic_history.size()[0] < 256 {
-      semantic_history.pad(&[256], "constant", Some(SEMANTIC_PAD_TOKEN as f64));
+      semantic_history = semantic_history.pad(&[256], "constant", Some(SEMANTIC_PAD_TOKEN as f64));
     }
     semantic_history
   } else {
@@ -337,32 +337,34 @@ pub fn generate_text_semantic(
   ], -1).unsqueeze(0);
 
   info!("input x shape: {:?}", x.size());
+  info!("input x shape: {}", x.data());
   let use_device = models.device.clone();
 
   let out = tch::no_grad(move|| -> Tensor {
     let mut x = x.to(use_device);
-    // TODO: modify back
+    // TODO: modify back 768
     let n_tot_steps = 768;
+    // let n_tot_steps = 10;
     let mut kv_cache: Option<Vec<Option<(Tensor, Tensor)>>> = None;
 
     
     let pb = ProgressBar::new(n_tot_steps);
     for index in 0..n_tot_steps {
       pb.inc(1);
-      match index {
-        753..=756 => {
-          info!("x content: {:?}", x.data());
-          info!("x content: {}", x.data());
-        },
-        _=> ()
-      }
+      // info!("x content: {:?}", x.data());
+      info!("x content: {}", x.data());
       // info!("index is: {index}");
       let input_x = if kv_cache.is_some() {
-        x.i((.., -1))
+        // x.select(-1, -1).unsqueeze(-1)
+        // let size = x.size();
+        // let length = size.last().unwrap();
+        x.i((.., (-1))).unsqueeze(-1)
       } else {
         x.i(..)
       };
+      info!("kv_cache is exist: {}, input x is: {}", kv_cache.is_some(), input_x);
       let (logits, new_kv_cache) = models.text.forward_t(index,&input_x , false, true, kv_cache, None, use_kv_caching);
+      // info!("new_kv_cache: {}", new_kv_cache.is_some());
       kv_cache = new_kv_cache;
 
       // must be [1, 1, 10048]
@@ -394,10 +396,12 @@ pub fn generate_text_semantic(
       // }
 
       let props = (relevant_logits / temp).softmax(-1, Kind::Float);
+      // info!("props: {}", props.data());
       // println!("props: {}", props.data());
       let item_next = props.multinomial(1, false);
       // println!("item_next.squeeze(): {}", item_next.squeeze());
-      // println!("item_next.int64_value(&[0]): {}", item_next.int64_value(&[0]));
+      println!("item_next: {}", item_next);
+      // println!("props.double_value(&[-1]): {}", props.i(-1));
       if allow_early_stop 
         && (item_next.int64_value(&[0]) == SEMANTIC_VOCAB_SIZE
             || props.double_value(&[-1]) >= min_eos_p
